@@ -73,19 +73,6 @@
       },
       "defaultValue": "Standard_A2"
     },
-    "vNetIPSpace": {
-      "type": "string",
-      "defaultValue": "10.0",
-      "allowedValues": [
-        "10.0",
-        "10.1",
-        "10.2",
-        "10.3"
-      ],
-      "metadata": {
-        "description": "Specify the IP space for the vNet where this deployment will be installed."
-      }
-    },
     "aadProxy1VMName": {
       "type": "string",
       "metadata": {
@@ -99,6 +86,20 @@
         "description": "Must be compliant with Windows Server naming convention"
       },
       "defaultValue": "AADP2-LAB"
+    },
+    "aadProxy1VMIPAddress": {
+      "type": "string",
+      "metadata": {
+        "description": "IP address for AAD Proxy Connector VM1"
+      },
+      "defaultValue": "10.0.9.4"
+    },
+    "aadProxy2VMIPAddress": {
+      "type": "string",
+      "metadata": {
+        "description": "IP address for AAD Proxy Connector VM2"
+      },
+      "defaultValue": "10.0.9.5"
     },
     "ScriptsLocation": {
       "type": "string",
@@ -117,8 +118,8 @@
 
     "AADProxysubnetResourceID": "[resourceId(parameters('existingVirtualNetworkResourceGroup'), 'Microsoft.Network/virtualNetworks/subnets', parameters('existingVirtualNetworkName'), parameters('AADProxySubnetName'))]",
 
-    "primaryAADProxy1IpAddress": "[concat(parameters('vNetIPSpace'),'.3.20')]",
-    "primaryAADProxy2IpAddress": "[concat(parameters('vNetIPSpace'),'.3.21')]",
+    "primaryAADProxy1IpAddress": "[parameters('aadProxy1VMIPAddress')]",
+    "primaryAADProxy2IpAddress": "[parameters('aadProxy2VMIPAddress')]",
 
     "VMTemplateURL": "[concat(variables('assetLocation'),'/data/AdminHost1VM.json')]",
     "deployAADProxyTemplateURL": "[concat(variables('assetLocation'),'/data/deployAADProxy.json')]",
