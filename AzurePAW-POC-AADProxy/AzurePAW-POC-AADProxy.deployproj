@@ -25,6 +25,8 @@
   <ItemGroup>
     <Content Include="azuredeploy.json" />
     <Content Include="azuredeploy.parameters.json" />
+    <None Include="data\AdminHost1VM.json" />
+    <None Include="data\deployAADProxy.json" />
     <None Include="Deployment.targets">
       <Visible>False</Visible>
     </None>

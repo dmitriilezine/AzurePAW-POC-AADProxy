@@ -1,8 +1,328 @@
 {
   "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
-  "parameters": {},
-  "variables": {},
-  "resources": [],
+  "parameters": {
+    "subscriptionID": {
+      "type": "string",
+      "metadata": {
+        "description": "Subscription ID is used to provide access path to the Key Vault"
+      },
+      "defaultValue": "Copy and Paste Subscription ID here. It is provided on the instructions OneNote page."
+    },
+    "domainName": {
+      "type": "string",
+      "metadata": {
+        "description": "Current deployment supports top level domain name only, for example contoso.com, fabrikam.com etc"
+      }
+    },
+    "adminUsername": {
+      "type": "string",
+      "metadata": {
+        "description": "The name of the Administrator of the new VMs and Domain"
+      },
+      "defaultValue": "labadmin"
+    },
+    "adminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "The password for the Administrator account of the new VMs and Domain. If you do not change it, then it will look like this: Subscription#SUBSCRIPTIONID"
+      },
+      "defaultValue": "[concat('Subscription#',subscription().subscriptionId)]"
+    },
+    "existingVirtualNetworkName": {
+      "type": "string",
+      "defaultValue": "Add existing vNet Name where this deployment will be deployed to",
+      "metadata": {
+        "description": "Specify the name for the vNet to whcih this server will be deployed."
+      }
+    },
+    "existingVirtualNetworkResourceGroup": {
+      "type": "string",
+      "defaultValue": "Add vNet RG Name",
+      "metadata": {
+        "description": "Name of the existing VNET resource group"
+      }
+    },
+    "AADProxySubnetName": {
+      "type": "string",
+      "defaultValue": "Add Subnet Name where RDS will be deployed in vNet -> AADProxySubnet...",
+      "metadata": {
+        "description": "Name of the subnet in the virtual network you want to put this VM"
+      }
+    },
+    "vaultName": {
+      "type": "string",
+      "metadata": {
+        "description": "The name of the Key Vault where secrets are stored"
+      }
+    },
+    "KeyVaultRG": {
+      "type": "string",
+      "metadata": {
+        "description": "The name of the RG where Key Vault is stored"
+      }
+    },
+    "VirtualMachineSize": {
+      "type": "string",
+      "allowedValues": [
+        "Standard_DS12_v2",
+        "Standard_A2"
+      ],
+      "metadata": {
+        "description": "VM Size. The bigger it is, the more $ you will spend."
+      },
+      "defaultValue": "Standard_A2"
+    },
+    "vNetIPSpace": {
+      "type": "string",
+      "defaultValue": "10.0",
+      "allowedValues": [
+        "10.0",
+        "10.1",
+        "10.2",
+        "10.3"
+      ],
+      "metadata": {
+        "description": "Specify the IP space for the vNet where this deployment will be installed."
+      }
+    },
+    "aadProxy1VMName": {
+      "type": "string",
+      "metadata": {
+        "description": "Must be compliant with Windows Server naming convention"
+      },
+      "defaultValue": "AADP1-LAB"
+    },
+    "aadProxy2VMName": {
+      "type": "string",
+      "metadata": {
+        "description": "Must be compliant with Windows Server naming convention"
+      },
+      "defaultValue": "AADP2-LAB"
+    },
+    "ScriptsLocation": {
+      "type": "string",
+      "metadata": {
+        "description": "Location of the storage account where scripts are located"
+      },
+      "defaultValue": "https://azurepaw.blob.core.windows.net"
+    }
+  },
+  "variables": {
+    "assetLocation": "https://raw.githubusercontent.com/dmitriilezine/AzurePAW-POC-AADProxy/master/AzurePAW-POC-AADProxy",
+    "assetLocationStorageAccount": "[parameters('ScriptsLocation')]",
+    "VMSize": "[parameters('VirtualMachineSize')]",
+    "OSVersion": "2016-Datacenter",
+    "numberOfRdshInstances": 2,
+
+    "AADProxysubnetResourceID": "[resourceId(parameters('existingVirtualNetworkResourceGroup'), 'Microsoft.Network/virtualNetworks/subnets', parameters('existingVirtualNetworkName'), parameters('AADProxySubnetName'))]",
+
+    "primaryAADProxy1IpAddress": "[concat(parameters('vNetIPSpace'),'.3.20')]",
+    "primaryAADProxy2IpAddress": "[concat(parameters('vNetIPSpace'),'.3.21')]",
+
+    "VMTemplateURL": "[concat(variables('assetLocation'),'/data/AdminHost1VM.json')]",
+    "deployAADProxyTemplateURL": "[concat(variables('assetLocation'),'/data/deployAADProxy.json')]",
+
+    "aadProxy1VMName": "[parameters('aadProxy1VMName')]",
+    "aadProxy2VMName": "[parameters('aadProxy2VMName')]",
+
+    "aadProxy1VMDeployment": "CreateAADProxy1VM",
+    "aadProxy1VMDeploymentId": "[concat('Microsoft.Resources/deployments/', variables('aadProxy1VMDeployment'))]",
+    "aadProxy2VMDeployment": "CreateAADProxy2VM",
+    "aadProxy2VMDeploymentId": "[concat('Microsoft.Resources/deployments/', variables('aadProxy2VMDeployment'))]",
+    "aadProxy1Deployment": "DeployAADProxy",
+    "aadProxy1DeploymentId": "[concat('Microsoft.Resources/deployments/', variables('aadProxy1Deployment'))]",
+
+    "shortDomainName": "[split(parameters('domainName'),'.')[0]]",
+    "domainSuffix": "[split(parameters('domainName'),'.')[1]]",
+    "ouPathT0Devices": "[concat('OU=T0-Devices; OU=Tier 0; OU=Admin;', 'DC=',variables('shortDomainName'),'; DC=',variables('domainSuffix'))]",
+    "ouPathAdmin": "[concat('OU=Admin;', 'DC=',variables('shortDomainName'),'; DC=',variables('domainSuffix'))]",
+    "ouPathHGS": "[concat('OU=T0-HGS; OU=T0-Servers; OU=Tier 0; OU=Admin;', 'DC=',variables('shortDomainName'),'; DC=',variables('domainSuffix'))]",
+    "ouPathT0Idenity": "[concat('OU=T0-Identity; OU=T0-Servers; OU=Tier 0; OU=Admin;', 'DC=',variables('shortDomainName'),'; DC=',variables('domainSuffix'))]",
+    "ouPathNone": "",
+
+    "vaultName": "[parameters('vaultName')]",
+    "secretName": "AzurePAWPOC1SAKey2",
+    "secretnameSASurl": "AzurePAWPOC1SAS",
+    "KeyVaultRG": "[parameters('KeyVaultRG')]",
+    "keyVaultID": "[concat('/subscriptions/', parameters('subscriptionID'), '/resourceGroups/', variables('KeyVaultRG'), '/providers/Microsoft.KeyVault/vaults/', variables('vaultName'))]",
+
+    "imageOffer": "WindowsServer",
+    "imagePublisher": "MicrosoftWindowsServer",
+
+    "aadProxyAvailabilitySetName": "aadProxyAvailabiltySet",
+
+    "aadProxy1NICName": "[concat('AADProxy1-Nic',resourceGroup().name)]",
+    "aadProxy2NICName": "[concat('AADProxy2-Nic',resourceGroup().name)]"
+
+  },
+  "resources": [
+   {
+      "name": "[variables('aadProxyAvailabilitySetName')]",
+      "type": "Microsoft.Compute/availabilitySets",
+      "apiVersion": "2017-03-30",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "PlatformUpdateDomainCount": 3,
+        "PlatformFaultDomainCount": 2
+      },
+      "sku": {
+        "name": "Aligned"
+      }
+    },
+    
+    {
+      "comments": "Deploy AAD App Proxy VM #1",
+      "name": "[variables('aadProxy1VMDeployment')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2015-01-01",
+      "dependsOn": [
+        "[variables('aadProxyAvailabilitySetName')]"
+      ],
+      "properties": {
+        "mode": "Incremental",
+        "templateLink": {
+          "uri": "[variables('VMTemplateURL')]",
+          "contentVersion": "1.0.0.0"
+        },
+        "parameters": {
+          "adminUsername": {
+            "value": "[parameters('adminUsername')]"
+          },
+          "adminPassword": {
+            "value": "[parameters('adminPassword')]"
+          },
+          "subnetResourceID": {
+            "value": "[variables('AADProxysubnetResourceID')]"
+          },
+          "windowsImageSKU": {
+            "value": "[variables('OSVersion')]"
+          },
+          "vmName": {
+            "value": "[variables('aadProxy1VMName')]"
+          },
+          "vmSize": {
+            "value": "[variables('VMSize')]"
+          },
+          "NicName": {
+            "value": "[variables('aadProxy1NICName')]"
+          },
+          "primaryIpAddress": {
+            "value": "[variables('primaryAADProxy1IpAddress')]"
+          },
+          "domainName": {
+            "value": "[parameters('domainName')]"
+          },
+          "availabilitySetName": {
+            "value": "[variables('aadProxyAvailabilitySetName')]"
+          },
+          "ouPath": {
+            "value": "[variables('ouPathT0Devices')]"
+          }
+        }
+      }
+    },
+    {
+      "comments": "Deploy AAD App Proxy VM #2",
+      "name": "[variables('aadProxy2VMDeployment')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2015-01-01",
+      "dependsOn": [
+        "[variables('aadProxyAvailabilitySetName')]"
+      ],
+      "properties": {
+        "mode": "Incremental",
+        "templateLink": {
+          "uri": "[variables('VMTemplateURL')]",
+          "contentVersion": "1.0.0.0"
+        },
+        "parameters": {
+          "adminUsername": {
+            "value": "[parameters('adminUsername')]"
+          },
+          "adminPassword": {
+            "value": "[parameters('adminPassword')]"
+          },
+          "subnetResourceID": {
+            "value": "[variables('AADProxysubnetResourceID')]"
+          },
+          "windowsImageSKU": {
+            "value": "[variables('OSVersion')]"
+          },
+          "vmName": {
+            "value": "[variables('aadProxy2VMName')]"
+          },
+          "vmSize": {
+            "value": "[variables('VMSize')]"
+          },
+          "NicName": {
+            "value": "[variables('aadProxy2NICName')]"
+          },
+          "primaryIpAddress": {
+            "value": "[variables('primaryAADProxy2IpAddress')]"
+          },
+          "domainName": {
+            "value": "[parameters('domainName')]"
+          },
+          "availabilitySetName": {
+            "value": "[variables('aadProxyAvailabilitySetName')]"
+          },
+          "ouPath": {
+            "value": "[variables('ouPathT0Devices')]"
+          }
+        }
+      }
+    },
+    {
+      "comments": "Deploy AAD Proxy on VM",
+      "name": "[variables('aadProxy1Deployment')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2015-01-01",
+      "dependsOn": [
+        "[variables('aadProxy1VMDeployment')]"
+      ],
+      "properties": {
+        "mode": "Incremental",
+        "templateLink": {
+          "uri": "[variables('deployAADProxyTemplateURL')]",
+          "contentVersion": "1.0.0.0"
+        },
+        "parameters": {
+          "VMName": {
+            "value": "[variables('aadProxy1VMName')]"
+          },
+          "domainName": {
+            "value": "[parameters('domainName')]"
+          },
+          "adminUsername": {
+            "value": "[parameters('adminUsername')]"
+          },
+          "adminPassword": {
+            "value": "[parameters('adminPassword')]"
+          },
+          "assetLocationStorageAccount": {
+            "value": "[variables('assetLocationStorageAccount')]"
+          },
+          "storageAccountKeyviaKeyvault": {
+            "reference": {
+              "keyVault": {
+                "id": "[variables('keyVaultID')]"
+              },
+              "secretName": "[variables('secretName')]"
+            }
+          },
+          "storageAccountSASTokenviaKeyvault": {
+            "reference": {
+              "keyVault": {
+                "id": "[variables('keyVaultID')]"
+              },
+              "secretName": "[variables('secretnameSASurl')]"
+            }
+          }
+        }
+      }
+    }
+
+  ],
   "outputs": {}
 }
